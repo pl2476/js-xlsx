@@ -10,9 +10,7 @@ const otherworkbook: XLSX.WorkBook = XLSX.readFile('test.xlsx', {type: 'file'});
 const author: string = workbook.Props.Author;
 
 const firstsheet: string = workbook.SheetNames[0];
-
 const firstworksheet: XLSX.WorkSheet = workbook.Sheets[firstsheet];
-
 const WB1A1: XLSX.CellObject = (firstworksheet["A1"]);
 
 interface Tester {
@@ -22,6 +20,10 @@ interface Tester {
 
 const jsonvalues: Tester[] = XLSX.utils.sheet_to_json<Tester>(firstworksheet);
 const csv: string = XLSX.utils.sheet_to_csv(firstworksheet);
+const txt: string = XLSX.utils.sheet_to_txt(firstworksheet);
+const dif: string = XLSX.utils.sheet_to_dif(firstworksheet);
+const slk: string = XLSX.utils.sheet_to_slk(firstworksheet);
+const eth: string = XLSX.utils.sheet_to_eth(firstworksheet);
 const formulae: string[] = XLSX.utils.sheet_to_formulae(firstworksheet);
 const aoa: any[][] = XLSX.utils.sheet_to_json<any[]>(firstworksheet, {raw:true, header:1});
 
@@ -39,3 +41,10 @@ const WBProps = workbook.Workbook;
 const WBSheets = WBProps.Sheets;
 const WBSheet0 = WBSheets[0];
 console.log(WBSheet0.Hidden);
+
+const fmt14 = XLSX.SSF._table[14];
+
+const newwb = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(newwb, aoa2, "AOA");
+XLSX.utils.book_append_sheet(newwb, js2ws, "JSON");
+const bstrxlsx: string = XLSX.write(newwb, {type: "binary", bookType: "xlsx" });

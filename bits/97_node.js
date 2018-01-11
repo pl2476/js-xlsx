@@ -10,15 +10,18 @@ if(has_buf && typeof require != 'undefined') (function() {
 		var FS = o.FS !== undefined ? o.FS : ",", fs = FS.charCodeAt(0);
 		var RS = o.RS !== undefined ? o.RS : "\n", rs = RS.charCodeAt(0);
 		var endregex = new RegExp((FS=="|" ? "\\|" : FS)+"+$");
-		var row/*:?string*/ = "", cols = [];
+		var row/*:?string*/ = "", cols/*:Array<string>*/ = [];
 		o.dense = Array.isArray(sheet);
-		for(var C = r.s.c; C <= r.e.c; ++C) cols[C] = encode_col(C);
+		var colinfo/*:Array<ColInfo>*/ = o.skipHidden && sheet["!cols"] || [];
+		var rowinfo/*:Array<RowInfo>*/ = o.skipHidden && sheet["!rows"] || [];
+		for(var C = r.s.c; C <= r.e.c; ++C) if (!((colinfo[C]||{}).hidden)) cols[C] = encode_col(C);
 		var R = r.s.r;
 		stream._read = function() {
 			if(R > r.e.r) return stream.push(null);
 			while(R <= r.e.r) {
-				row = make_csv_row(sheet, r, R, cols, fs, rs, FS, o);
 				++R;
+				if ((rowinfo[R-1]||{}).hidden) continue;
+				row = make_csv_row(sheet, r, R-1, cols, fs, rs, FS, o);
 				if(row != null) {
 					if(o.strip) row = row.replace(endregex,"");
 					stream.push(row + RS);
@@ -29,23 +32,25 @@ if(has_buf && typeof require != 'undefined') (function() {
 		return stream;
 	};
 
-	var write_html_stream = function(sheet/*:Worksheet*/, opts/*:?Sheet2HTMLOpts*/) {
+	var write_html_stream = function(ws/*:Worksheet*/, opts/*:?Sheet2HTMLOpts*/) {
 		var stream = Readable();
 
-		var o = opts == null ? {} : opts;
-		var r = decode_range(sheet['!ref']), cell/*:Cell*/;
-		o.dense = Array.isArray(sheet);
-		stream.push(HTML_.BEGIN);
-
+		var o = opts || {};
+		var header = o.header != null ? o.header : HTML_.BEGIN;
+		var footer = o.footer != null ? o.footer : HTML_.END;
+		stream.push(header);
+		var r = decode_range(ws['!ref']);
+		o.dense = Array.isArray(ws);
+		stream.push(HTML_._preamble(ws, r, o));
 		var R = r.s.r;
 		var end = false;
 		stream._read = function() {
 			if(R > r.e.r) {
-				if(!end) { end = true; stream.push(HTML_.END); }
+				if(!end) { end = true; stream.push("</table>" + footer); }
 				return stream.push(null);
 			}
 			while(R <= r.e.r) {
-				stream.push(HTML_._row(sheet, r, R, o));
+				stream.push(HTML_._row(ws, r, R, o));
 				++R;
 				break;
 			}

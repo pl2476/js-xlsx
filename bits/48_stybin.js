@@ -1,8 +1,8 @@
 /* [MS-XLSB] 2.4.651 BrtFmt */
 function parse_BrtFmt(data, length/*:number*/) {
-	var ifmt = data.read_shift(2);
+	var numFmtId = data.read_shift(2);
 	var stFmtCode = parse_XLWideString(data,length-2);
-	return [ifmt, stFmtCode];
+	return [numFmtId, stFmtCode];
 }
 function write_BrtFmt(i/*:number*/, f/*:string*/, o) {
 	if(!o) o = new_buf(6 + 4 * f.length);
@@ -102,6 +102,7 @@ var XLSBFillPTNames = [
 ];
 var rev_XLSBFillPTNames/*:EvertNumType*/ = (evert(XLSBFillPTNames)/*:any*/);
 /* TODO: gradient fill representation */
+var parse_BrtFill = parsenoop;
 function write_BrtFill(fill, o) {
 	if(!o) o = new_buf(4*3 + 8*7 + 16*1);
 	var fls/*:number*/ = rev_XLSBFillPTNames[fill.patternType];
@@ -133,10 +134,11 @@ function write_BrtFill(fill, o) {
 
 /* [MS-XLSB] 2.4.816 BrtXF */
 function parse_BrtXF(data, length/*:number*/) {
+	var tgt = data.l + length;
 	var ixfeParent = data.read_shift(2);
 	var ifmt = data.read_shift(2);
-	parsenoop(data, length-4);
-	return {ixfe:ixfeParent, ifmt:ifmt };
+	data.l = tgt;
+	return {ixfe:ixfeParent, numFmtId:ifmt };
 }
 function write_BrtXF(data, ixfeP, o) {
 	if(!o) o = new_buf(16);
@@ -164,6 +166,7 @@ function write_Blxf(data, o) {
 	return o;
 }
 /* [MS-XLSB] 2.4.299 BrtBorder TODO */
+var parse_BrtBorder = parsenoop;
 function write_BrtBorder(border, o) {
 	if(!o) o = new_buf(51);
 	o.write_shift(1, 0); /* diagonal */
@@ -203,7 +206,7 @@ function parse_sty_bin(data, themes, opts) {
 
 	styles.CellXf = [];
 	styles.Fonts = [];
-	var state = [];
+	var state/*:Array<string>*/ = [];
 	var pass = false;
 	recordhopper(data, function hopper_sty(val, R_n, RT) {
 		switch(RT) {
@@ -259,14 +262,14 @@ function parse_sty_bin(data, themes, opts) {
 function write_FMTS_bin(ba, NF/*:?SSFTable*/) {
 	if(!NF) return;
 	var cnt = 0;
-	[[5,8],[23,26],[41,44],[/*63*/57,/*66],[164,*/392]].forEach(function(r) {
+	[[5,8],[23,26],[41,44],[/*63*/50,/*66],[164,*/392]].forEach(function(r) {
 		/*:: if(!NF) return; */
 		for(var i = r[0]; i <= r[1]; ++i) if(NF[i] != null) ++cnt;
 	});
 
 	if(cnt == 0) return;
 	write_record(ba, "BrtBeginFmts", write_UInt32LE(cnt));
-	[[5,8],[23,26],[41,44],[/*63*/57,/*66],[164,*/392]].forEach(function(r) {
+	[[5,8],[23,26],[41,44],[/*63*/50,/*66],[164,*/392]].forEach(function(r) {
 		/*:: if(!NF) return; */
 		for(var i = r[0]; i <= r[1]; ++i) if(NF[i] != null) write_record(ba, "BrtFmt", write_BrtFmt(i, NF[i]));
 	});

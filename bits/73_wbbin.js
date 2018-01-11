@@ -17,17 +17,39 @@ function write_BrtBundleSh(data, o) {
 }
 
 /* [MS-XLSB] 2.4.807 BrtWbProp */
-function parse_BrtWbProp(data, length) {
-	data.read_shift(4);
-	var dwThemeVersion = data.read_shift(4);
+function parse_BrtWbProp(data, length)/*:WBProps*/ {
+	var o/*:WBProps*/ = ({}/*:any*/);
+	var flags = data.read_shift(4);
+	o.defaultThemeVersion = data.read_shift(4);
 	var strName = (length > 8) ? parse_XLWideString(data) : "";
-	return [dwThemeVersion, strName];
+	if(strName.length > 0) o.CodeName = strName;
+	o.autoCompressPictures = !!(flags & 0x10000);
+	o.backupFile = !!(flags & 0x40);
+	o.checkCompatibility = !!(flags & 0x1000);
+	o.date1904 = !!(flags & 0x01);
+	o.filterPrivacy = !!(flags & 0x08);
+	o.hidePivotFieldList = !!(flags & 0x400);
+	o.promptedSolutions = !!(flags & 0x10);
+	o.publishItems = !!(flags & 0x800);
+	o.refreshAllConnections = !!(flags & 0x40000);
+	o.saveExternalLinkValues = !!(flags & 0x80);
+	o.showBorderUnselectedTables = !!(flags & 0x04);
+	o.showInkAnnotation = !!(flags & 0x20);
+	o.showObjects = ["all", "placeholders", "none"][(flags >> 13) & 0x03];
+	o.showPivotChartFilter = !!(flags & 0x8000);
+	o.updateLinks = ["userSet", "never", "always"][(flags >> 8) & 0x03];
+	return o;
 }
-function write_BrtWbProp(data, o) {
+function write_BrtWbProp(data/*:?WBProps*/, o) {
 	if(!o) o = new_buf(72);
+	var flags = 0;
+	if(data) {
+		/* TODO: mirror parse_BrtWbProp fields */
+		if(data.filterPrivacy) flags |= 0x08;
+	}
+	o.write_shift(4, flags);
 	o.write_shift(4, 0);
-	o.write_shift(4, 0);
-	write_XLSBCodeName("ThisWorkbook", o);
+	write_XLSBCodeName(data && data.CodeName || "ThisWorkbook", o);
 	return o.slice(0, o.l);
 }
 
@@ -55,8 +77,9 @@ function parse_BrtName(data, length, opts) {
 		// unusedstring2: XLNullableWideString
 	//}
 	data.l = end;
-	var out = ({Name:name, Ptg:formula, Comment:comment}/*:any*/);
+	var out = ({Name:name, Ptg:formula}/*:any*/);
 	if(itab < 0xFFFFFFF) out.Sheet = itab;
+	if(comment) out.Comment = comment;
 	return out;
 }
 
@@ -69,8 +92,9 @@ function parse_wb_bin(data, opts)/*:WorkbookFile*/ {
 	opts.biff = 12;
 
 	var Names = [];
-	var supbooks = ([]/*:any*/);
+	var supbooks = ([[]]/*:any*/);
 	supbooks.SheetNames = [];
+	supbooks.XTI = [];
 
 	recordhopper(data, function hopper_wb(val, R_n, RT) {
 		switch(RT) {
@@ -78,12 +102,33 @@ function parse_wb_bin(data, opts)/*:WorkbookFile*/ {
 				supbooks.SheetNames.push(val.name);
 				wb.Sheets.push(val); break;
 
+			case 0x0099: /* 'BrtWbProp' */
+				wb.WBProps = val; break;
+
 			case 0x0027: /* 'BrtName' */
+				if(val.Sheet != null) opts.SID = val.Sheet;
 				val.Ref = stringify_formula(val.Ptg, null, null, supbooks, opts);
+				delete opts.SID;
 				delete val.Ptg;
 				Names.push(val);
 				break;
 			case 0x040C: /* 'BrtNameExt' */ break;
+
+			case 0x0165: /* 'BrtSupSelf' */
+			case 0x0166: /* 'BrtSupSame' */
+			case 0x0163: /* 'BrtSupBookSrc' */
+			case 0x029B: /* 'BrtSupAddin' */
+				if(!supbooks[0].length) supbooks[0] = [RT, val];
+				else supbooks.push([RT, val]);
+				supbooks[supbooks.length - 1].XTI = [];
+				break;
+			case 0x016A: /* 'BrtExternSheet' */
+				if(supbooks.length === 0) { supbooks[0] = []; supbooks[0].XTI = []; }
+				supbooks[supbooks.length - 1].XTI = supbooks[supbooks.length - 1].XTI.concat(val);
+				supbooks.XTI = supbooks.XTI.concat(val);
+				break;
+			case 0x0169: /* 'BrtPlaceholderName' */
+				break;
 
 			/* case 'BrtModelTimeGroupingCalcCol' */
 			/* case 'BrtRevisionPtr' */
@@ -95,7 +140,6 @@ function parse_wb_bin(data, opts)/*:WorkbookFile*/ {
 			case 0x009D: /* 'BrtCalcProp' */
 			case 0x0262: /* 'BrtCrashRecErr' */
 			case 0x0802: /* 'BrtDecoupledPivotCacheID' */
-			case 0x016A: /* 'BrtExternSheet' */
 			case 0x009B: /* 'BrtFileRecover' */
 			case 0x0224: /* 'BrtFileSharing' */
 			case 0x02A4: /* 'BrtFileSharingIso' */
@@ -105,18 +149,12 @@ function parse_wb_bin(data, opts)/*:WorkbookFile*/ {
 			case 0x084D: /* 'BrtModelTable' */
 			case 0x0225: /* 'BrtOleSize' */
 			case 0x0805: /* 'BrtPivotTableRef' */
-			case 0x0169: /* 'BrtPlaceholderName' */
 			case 0x0254: /* 'BrtSmartTagType' */
-			case 0x029B: /* 'BrtSupAddin' */
-			case 0x0163: /* 'BrtSupBookSrc' */
-			case 0x0166: /* 'BrtSupSame' */
-			case 0x0165: /* 'BrtSupSelf' */
 			case 0x081C: /* 'BrtTableSlicerCacheID' */
 			case 0x081B: /* 'BrtTableSlicerCacheIDs' */
 			case 0x0822: /* 'BrtTimelineCachePivotCacheID' */
 			case 0x018D: /* 'BrtUserBookView' */
 			case 0x009A: /* 'BrtWbFactoid' */
-			case 0x0099: /* 'BrtWbProp' */
 			case 0x045D: /* 'BrtWbProp14' */
 			case 0x0229: /* 'BrtWebOpt' */
 			case 0x082B: /* 'BrtWorkBookPr15' */
@@ -143,6 +181,7 @@ function parse_wb_bin(data, opts)/*:WorkbookFile*/ {
 	// $FlowIgnore
 	wb.Names = Names;
 
+	(wb/*:any*/).supbooks = supbooks;
 	return wb;
 }
 
@@ -227,7 +266,7 @@ function write_wb_bin(wb, opts) {
 	write_record(ba, "BrtBeginBook");
 	write_record(ba, "BrtFileVersion", write_BrtFileVersion());
 	/* [[BrtFileSharingIso] BrtFileSharing] */
-	write_record(ba, "BrtWbProp", write_BrtWbProp());
+	write_record(ba, "BrtWbProp", write_BrtWbProp(wb.Workbook && wb.Workbook.WBProps || null));
 	/* [ACABSPATH] */
 	/* [[BrtBookProtectionIso] BrtBookProtection] */
 	write_BOOKVIEWS(ba, wb, opts);

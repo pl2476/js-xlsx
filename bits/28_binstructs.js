@@ -5,7 +5,7 @@ function write_UInt32LE(x/*:number*/, o) {
 }
 
 /* [MS-XLSB] 2.5.168 */
-function parse_XLWideString(data)/*:string*/ {
+function parse_XLWideString(data/*::, length*/)/*:string*/ {
 	var cchCharacters = data.read_shift(4);
 	return cchCharacters === 0 ? "" : data.read_shift(cchCharacters, 'dbcs');
 }
@@ -88,7 +88,7 @@ var parse_XLSBCodeName = parse_XLWideString;
 var write_XLSBCodeName = write_XLWideString;
 
 /* [MS-XLSB] 2.5.166 */
-function parse_XLNullableWideString(data)/*:string*/ {
+function parse_XLNullableWideString(data/*::, length*/)/*:string*/ {
 	var cchCharacters = data.read_shift(4);
 	return cchCharacters === 0 || cchCharacters === 0xFFFFFFFF ? "" : data.read_shift(cchCharacters, 'dbcs');
 }
@@ -129,7 +129,7 @@ function write_RkNumber(data/*:number*/, o) {
 
 
 /* [MS-XLSB] 2.5.117 RfX */
-function parse_RfX(data)/*:Range*/ {
+function parse_RfX(data /*::, length*/)/*:Range*/ {
 	var cell/*:Range*/ = ({s: {}, e: {}}/*:any*/);
 	cell.s.r = data.read_shift(4);
 	cell.e.r = data.read_shift(4);
@@ -192,11 +192,11 @@ function parse_BrtColor(data, length/*:number*/) {
 			out.index = index;
 			var icv = XLSIcv[index];
 			/* automatic pseudo index 81 */
-			if(icv) out.rgb = icv[0].toString(16) + icv[1].toString(16) + icv[2].toString(16);
+			if(icv) out.rgb = rgb2Hex(icv);
 			break;
 		case 2:
 			/* if(!fValidRGB) throw new Error("invalid"); */
-			out.rgb = bR.toString(16) + bG.toString(16) + bB.toString(16);
+			out.rgb = rgb2Hex([bR, bG, bB]);
 			break;
 		case 3: out.theme = index; break;
 	}
@@ -264,4 +264,20 @@ function write_FontFlags(font, o) {
 	o.write_shift(1, 0);
 	return o;
 }
+
+/* [MS-OLEDS] 2.3.1 and 2.3.2 */
+function parse_ClipboardFormatOrString(o, w/*:number*/)/*:string*/ {
+	// $FlowIgnore
+	var ClipFmt = {2:"BITMAP",3:"METAFILEPICT",8:"DIB",14:"ENHMETAFILE"};
+	var m/*:number*/ = o.read_shift(4);
+	switch(m) {
+		case 0x00000000: return "";
+		case 0xffffffff: case 0xfffffffe: return ClipFmt[o.read_shift(4)]||"";
+	}
+	if(m > 0x190) throw new Error("Unsupported Clipboard: " + m.toString(16));
+	o.l -= 4;
+	return o.read_shift(0, w == 1 ? "lpstr" : "lpwstr");
+}
+function parse_ClipboardFormatOrAnsiString(o) { return parse_ClipboardFormatOrString(o, 1); }
+function parse_ClipboardFormatOrUnicodeString(o) { return parse_ClipboardFormatOrString(o, 2); }
 

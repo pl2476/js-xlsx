@@ -17,30 +17,32 @@ var EXT_PROPS/*:Array<Array<string> >*/ = [
 XMLNS.EXT_PROPS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties";
 RELS.EXT_PROPS  = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties';
 
-function parse_ext_props(data, p) {
+function parse_ext_props(data, p, opts) {
 	var q = {}; if(!p) p = {};
+	data = utf8read(data);
 
 	EXT_PROPS.forEach(function(f) {
 		switch(f[2]) {
 			case "string": p[f[1]] = (data.match(matchtag(f[0]))||[])[1]; break;
 			case "bool": p[f[1]] = (data.match(matchtag(f[0]))||[])[1] === "true"; break;
 			case "raw":
-				var cur = data.match(new RegExp("<" + f[0] + "[^>]*>(.*)<\/" + f[0] + ">"));
+				var cur = data.match(new RegExp("<" + f[0] + "[^>]*>([\\s\\S]*?)<\/" + f[0] + ">"));
 				if(cur && cur.length > 0) q[f[1]] = cur[1];
 				break;
 		}
 	});
 
 	if(q.HeadingPairs && q.TitlesOfParts) {
-		var v = parseVector(q.HeadingPairs);
-		var parts = parseVector(q.TitlesOfParts).map(function(x) { return x.v; });
+		var v = parseVector(q.HeadingPairs, opts);
+		var parts = parseVector(q.TitlesOfParts, opts).map(function (x) { return x.v; });
 		var idx = 0, len = 0;
-		for(var i = 0; i !== v.length; i+=2) {
+		if(parts.length > 0) for(var i = 0; i !== v.length; i += 2) {
 			len = +(v[i+1].v);
 			switch(v[i].v) {
 				case "Worksheets":
 				case "工作表":
 				case "Листы":
+				case "أوراق العمل":
 				case "ワークシート":
 				case "גליונות עבודה":
 				case "Arbeitsblätter":
@@ -49,13 +51,16 @@ function parse_ext_props(data, p) {
 				case "Fogli di lavoro":
 				case "Folhas de cálculo":
 				case "Planilhas":
+				case "Regneark":
 				case "Werkbladen":
 					p.Worksheets = len;
 					p.SheetNames = parts.slice(idx, idx + len);
 					break;
 
 				case "Named Ranges":
+				case "名前付き一覧":
 				case "Benannte Bereiche":
+				case "Navngivne områder":
 					p.NamedRanges = len;
 					p.DefinedNames = parts.slice(idx, idx + len);
 					break;
@@ -79,7 +84,7 @@ var EXT_PROPS_XML_ROOT = writextag('Properties', null, {
 });
 
 function write_ext_props(cp, opts)/*:string*/ {
-	var o = [], p = {}, W = writextag;
+	var o/*:Array<string>*/ = [], p = {}, W = writextag;
 	if(!cp) cp = {};
 	cp.Application = "SheetJS";
 	o[o.length] = (XML_HEADER);

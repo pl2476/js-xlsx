@@ -7,9 +7,10 @@ function parse_FILETIME(blob) {
 }
 
 /* [MS-OSHARED] 2.3.3.1.4 Lpstr */
-function parse_lpstr(blob, type, pad) {
-	var str = blob.read_shift(0, 'lpstr');
-	if(pad) blob.l += (4 - ((str.length+1) & 3)) & 3;
+function parse_lpstr(blob, type, pad/*:?number*/) {
+	var start = blob.l;
+	var str = blob.read_shift(0, 'lpstr-cp');
+	if(pad) while((blob.l - start) & 3) ++blob.l;
 	return str;
 }
 
@@ -28,19 +29,19 @@ function parse_VtStringBase(blob, stringType, pad) {
 	return parse_lpstr(blob, stringType, pad);
 }
 
-function parse_VtString(blob, t, pad) { return parse_VtStringBase(blob, t, pad === false ? 0: 4); }
-function parse_VtUnalignedString(blob, t) { if(!t) throw new Error("dafuq?"); return parse_VtStringBase(blob, t, 0); }
+function parse_VtString(blob, t/*:number*/, pad/*:?boolean*/) { return parse_VtStringBase(blob, t, pad === false ? 0: 4); }
+function parse_VtUnalignedString(blob, t/*:number*/) { if(!t) throw new Error("VtUnalignedString must have positive length"); return parse_VtStringBase(blob, t, 0); }
 
 /* [MS-OSHARED] 2.3.3.1.9 VtVecUnalignedLpstrValue */
-function parse_VtVecUnalignedLpstrValue(blob) {
+function parse_VtVecUnalignedLpstrValue(blob)/*:Array<string>*/ {
 	var length = blob.read_shift(4);
-	var ret = [];
-	for(var i = 0; i != length; ++i) ret[i] = blob.read_shift(0, 'lpstr');
+	var ret/*:Array<string>*/ = [];
+	for(var i = 0; i != length; ++i) ret[i] = blob.read_shift(0, 'lpstr-cp').replace(chr0,'');
 	return ret;
 }
 
 /* [MS-OSHARED] 2.3.3.1.10 VtVecUnalignedLpstr */
-function parse_VtVecUnalignedLpstr(blob) {
+function parse_VtVecUnalignedLpstr(blob)/*:Array<string>*/ {
 	return parse_VtVecUnalignedLpstrValue(blob);
 }
 
@@ -108,7 +109,7 @@ function parse_VtVector(blob, cb) {
 }
 
 /* [MS-OLEPS] 2.15 TypedPropertyValue */
-function parse_TypedPropertyValue(blob, type, _opts) {
+function parse_TypedPropertyValue(blob, type/*:number*/, _opts)/*:any*/ {
 	var t = blob.read_shift(2), ret, opts = _opts||{};
 	blob.l += 2;
 	if(type !== VT_VARIANT)
@@ -123,8 +124,8 @@ function parse_TypedPropertyValue(blob, type, _opts) {
 		case 0x40 /*VT_FILETIME*/: return parse_FILETIME(blob);
 		case 0x41 /*VT_BLOB*/: return parse_BLOB(blob);
 		case 0x47 /*VT_CF*/: return parse_ClipboardData(blob);
-		case 0x50 /*VT_STRING*/: return parse_VtString(blob, t, !opts.raw && 4).replace(chr0,'');
-		case 0x51 /*VT_USTR*/: return parse_VtUnalignedString(blob, t, 4).replace(chr0,'');
+		case 0x50 /*VT_STRING*/: return parse_VtString(blob, t, !opts.raw).replace(chr0,'');
+		case 0x51 /*VT_USTR*/: return parse_VtUnalignedString(blob, t/*, 4*/).replace(chr0,'');
 		case 0x100C /*VT_VECTOR|VT_VARIANT*/: return parse_VtVecHeadingPair(blob);
 		case 0x101E /*VT_LPSTR*/: return parse_VtVecUnalignedLpstr(blob);
 		default: throw new Error("TypedPropertyValue unrecognized type " + type + " " + t);
@@ -155,16 +156,17 @@ function parse_PropertySet(blob, PIDSI) {
 		var Offset = blob.read_shift(4);
 		Props[i] = [PropID, Offset + start_addr];
 	}
+	Props.sort(function(x,y) { return x[1] - y[1]; });
 	var PropH = {};
 	for(i = 0; i != NumProps; ++i) {
 		if(blob.l !== Props[i][1]) {
 			var fail = true;
 			if(i>0 && PIDSI) switch(PIDSI[Props[i-1][0]].t) {
-				case 0x02 /*VT_I2*/: if(blob.l +2 === Props[i][1]) { blob.l+=2; fail = false; } break;
+				case 0x02 /*VT_I2*/: if(blob.l+2 === Props[i][1]) { blob.l+=2; fail = false; } break;
 				case 0x50 /*VT_STRING*/: if(blob.l <= Props[i][1]) { blob.l=Props[i][1]; fail = false; } break;
 				case 0x100C /*VT_VECTOR|VT_VARIANT*/: if(blob.l <= Props[i][1]) { blob.l=Props[i][1]; fail = false; } break;
 			}
-			if(!PIDSI && blob.l <= Props[i][1]) { fail=false; blob.l = Props[i][1]; }
+			if((!PIDSI||i==0) && blob.l <= Props[i][1]) { fail=false; blob.l = Props[i][1]; }
 			if(fail) throw new Error("Read Error: Expected address " + Props[i][1] + ' at ' + blob.l + ' :' + i);
 		}
 		if(PIDSI) {
@@ -193,12 +195,12 @@ function parse_PropertySet(blob, PIDSI) {
 				case 1252:
 				case 65000: case -536:
 				case 65001: case -535:
-					set_cp(CodePage = PropH[piddsi.n]); break;
+					set_cp(CodePage = (PropH[piddsi.n]>>>0) & 0xFFFF); break;
 				default: throw new Error("Unsupported CodePage: " + PropH[piddsi.n]);
 			}
 		} else {
 			if(Props[i][0] === 0x1) {
-				CodePage = PropH.CodePage = parse_TypedPropertyValue(blob, VT_I2);
+				CodePage = PropH.CodePage = (parse_TypedPropertyValue(blob, VT_I2)/*:number*/);
 				set_cp(CodePage);
 				if(Dictionary !== -1) {
 					var oldpos = blob.l;
@@ -235,6 +237,7 @@ function parse_PropertySet(blob, PIDSI) {
 /* [MS-OLEPS] 2.21 PropertySetStream */
 function parse_PropertySetStream(file, PIDSI) {
 	var blob = file.content;
+	if(!blob) return ({}/*:any*/);
 	prep_blob(blob, 0);
 
 	var NumSets, FMTID0, FMTID1, Offset0, Offset1 = 0;
@@ -267,6 +270,7 @@ function parse_PropertySetStream(file, PIDSI) {
 
 
 function parsenoop2(blob, length) { blob.read_shift(length); return null; }
+function writezeroes(n, o) { if(!o) o=new_buf(n); for(var j=0; j<n; ++j) o.write_shift(1, 0); return o; }
 
 function parslurp(blob, length, cb) {
 	var arr = [], target = blob.l + length;
@@ -275,20 +279,25 @@ function parslurp(blob, length, cb) {
 	return arr;
 }
 
-function parsebool(blob, length) { return blob.read_shift(length) === 0x1; }
+function parsebool(blob, length/*:number*/) { return blob.read_shift(length) === 0x1; }
+function writebool(v/*:any*/, o) { if(!o) o=new_buf(2); o.write_shift(2, +!!v); return o; }
 
-function parseuint16(blob) { return blob.read_shift(2, 'u'); }
-function parseuint16a(blob, length) { return parslurp(blob,length,parseuint16);}
+function parseuint16(blob/*::, length:?number, opts:?any*/) { return blob.read_shift(2, 'u'); }
+function writeuint16(v/*:number*/, o) { if(!o) o=new_buf(2); o.write_shift(2, v); return o; }
+function parseuint16a(blob, length/*:: :?number, opts:?any*/) { return parslurp(blob,length,parseuint16);}
 
 /* --- 2.5 Structures --- */
 
-/* [MS-XLS] 2.5.14 Boolean */
-var parse_Boolean = parsebool;
-
 /* [MS-XLS] 2.5.10 Bes (boolean or error) */
-function parse_Bes(blob) {
+function parse_Bes(blob/*::, length*/) {
 	var v = blob.read_shift(1), t = blob.read_shift(1);
 	return t === 0x01 ? v : v === 0x01;
+}
+function write_Bes(v, t/*:string*/, o) {
+	if(!o) o = new_buf(2);
+	o.write_shift(1, +v);
+	o.write_shift(1, t == 'e' ? 1 : 0);
+	return o;
 }
 
 /* [MS-XLS] 2.5.240 ShortXLUnicodeString */
@@ -319,7 +328,7 @@ function parse_XLUnicodeRichExtendedString(blob) {
 	var z = {};
 	if(fRichSt) cRun = blob.read_shift(2);
 	if(fExtSt) cbExtRst = blob.read_shift(4);
-	var encoding = (flags & 0x1) ? 'dbcs-cont' : 'sbcs-cont';
+	var encoding = width == 2 ? 'dbcs-cont' : 'sbcs-cont';
 	var msg = cch === 0 ? "" : blob.read_shift(cch, encoding);
 	if(fRichSt) blob.l += 4 * cRun; //TODO: parse this
 	if(fExtSt) blob.l += cbExtRst; //TODO: parse this
@@ -353,14 +362,28 @@ function parse_XLUnicodeString2(blob, length, opts) {
 	if(opts.biff > 5) return parse_XLUnicodeString(blob, length, opts);
 	var cch = blob.read_shift(1);
 	if(cch === 0) { blob.l++; return ""; }
-	return blob.read_shift(cch, 'sbcs-cont');
+	return blob.read_shift(cch, opts.biff == 4 ? 'cpstr' : 'sbcs-cont');
+}
+/* TODO: BIFF5 and lower, codepage awareness */
+function write_XLUnicodeString(str, opts, o) {
+	if(!o) o = new_buf(3 + 2 * str.length);
+	o.write_shift(2, str.length);
+	o.write_shift(1, 1);
+	o.write_shift(31, str, 'utf16le');
+	return o;
 }
 
 /* [MS-XLS] 2.5.61 ControlInfo */
-var parse_ControlInfo = parsenoop;
+function parse_ControlInfo(blob, length, opts) {
+	var flags = blob.read_shift(1);
+	blob.l++;
+	var accel = blob.read_shift(2);
+	blob.l += 2;
+	return [flags, accel];
+}
 
 /* [MS-OSHARED] 2.3.7.6 URLMoniker TODO: flags */
-var parse_URLMoniker = function(blob/*, length, opts*/) {
+function parse_URLMoniker(blob/*::, length, opts*/) {
 	var len = blob.read_shift(4), start = blob.l;
 	var extra = false;
 	if(len > 24) {
@@ -372,60 +395,93 @@ var parse_URLMoniker = function(blob/*, length, opts*/) {
 	var url = blob.read_shift((extra?len-24:len)>>1, 'utf16le').replace(chr0,"");
 	if(extra) blob.l += 24;
 	return url;
-};
+}
 
 /* [MS-OSHARED] 2.3.7.8 FileMoniker TODO: all fields */
-var parse_FileMoniker = function(blob, length) {
+function parse_FileMoniker(blob, length) {
 	var cAnti = blob.read_shift(2);
-	var ansiLength = blob.read_shift(4);
-	var ansiPath = blob.read_shift(ansiLength, 'cstr');
+	var ansiPath = blob.read_shift(0, 'lpstr-ansi');
 	var endServer = blob.read_shift(2);
-	var versionNumber = blob.read_shift(2);
-	var cbUnicodePathSize = blob.read_shift(4);
-	if(cbUnicodePathSize === 0) return ansiPath.replace(/\\/g,"/");
-	var cbUnicodePathBytes = blob.read_shift(4);
-	var usKeyValue = blob.read_shift(2);
-	var unicodePath = blob.read_shift(cbUnicodePathBytes>>1, 'utf16le').replace(chr0,"");
+	if(blob.read_shift(2) != 0xDEAD) throw new Error("Bad FileMoniker");
+	var sz = blob.read_shift(4);
+	if(sz === 0) return ansiPath.replace(/\\/g,"/");
+	var bytes = blob.read_shift(4);
+	if(blob.read_shift(2) != 3) throw new Error("Bad FileMoniker");
+	var unicodePath = blob.read_shift(bytes>>1, 'utf16le').replace(chr0,"");
 	return unicodePath;
-};
+}
 
 /* [MS-OSHARED] 2.3.7.2 HyperlinkMoniker TODO: all the monikers */
-var parse_HyperlinkMoniker = function(blob, length) {
+function parse_HyperlinkMoniker(blob, length) {
 	var clsid = blob.read_shift(16); length -= 16;
 	switch(clsid) {
 		case "e0c9ea79f9bace118c8200aa004ba90b": return parse_URLMoniker(blob, length);
 		case "0303000000000000c000000000000046": return parse_FileMoniker(blob, length);
 		default: throw new Error("Unsupported Moniker " + clsid);
 	}
-};
+}
 
 /* [MS-OSHARED] 2.3.7.9 HyperlinkString */
-var parse_HyperlinkString = function(blob, length) {
+function parse_HyperlinkString(blob, length) {
 	var len = blob.read_shift(4);
-	var o = blob.read_shift(len, 'utf16le').replace(chr0, "");
+	var o = len > 0 ? blob.read_shift(len, 'utf16le').replace(chr0, "") : "";
 	return o;
-};
+}
 
-/* [MS-OSHARED] 2.3.7.1 Hyperlink Object TODO: unify params with XLSX */
-var parse_Hyperlink = function(blob, length) {
+/* [MS-OSHARED] 2.3.7.1 Hyperlink Object */
+function parse_Hyperlink(blob, length)/*:Hyperlink*/ {
 	var end = blob.l + length;
 	var sVer = blob.read_shift(4);
 	if(sVer !== 2) throw new Error("Unrecognized streamVersion: " + sVer);
 	var flags = blob.read_shift(2);
 	blob.l += 2;
-	var displayName, targetFrameName, moniker, oleMoniker, location, guid, fileTime;
+	var displayName, targetFrameName, moniker, oleMoniker, Location="", guid, fileTime;
 	if(flags & 0x0010) displayName = parse_HyperlinkString(blob, end - blob.l);
 	if(flags & 0x0080) targetFrameName = parse_HyperlinkString(blob, end - blob.l);
 	if((flags & 0x0101) === 0x0101) moniker = parse_HyperlinkString(blob, end - blob.l);
 	if((flags & 0x0101) === 0x0001) oleMoniker = parse_HyperlinkMoniker(blob, end - blob.l);
-	if(flags & 0x0008) location = parse_HyperlinkString(blob, end - blob.l);
+	if(flags & 0x0008) Location = parse_HyperlinkString(blob, end - blob.l);
 	if(flags & 0x0020) guid = blob.read_shift(16);
-	if(flags & 0x0040) fileTime = parse_FILETIME(blob, 8);
+	if(flags & 0x0040) fileTime = parse_FILETIME(blob/*, 8*/);
 	blob.l = end;
-	var target = (targetFrameName||moniker||oleMoniker);
-	if(location) target+="#"+location;
+	var target = targetFrameName||moniker||oleMoniker||"";
+	if(target && Location) target+="#"+Location;
+	if(!target) target = "#" + Location;
 	return {Target: target};
-};
+}
+function write_Hyperlink(hl) {
+	var out = new_buf(512), i = 0;
+	var Target = hl.Target;
+	var F = Target.indexOf("#") > -1 ? 0x1f : 0x17;
+	switch(Target.charAt(0)) { case "#": F=0x1c; break; case ".": F&=~2; break; }
+	out.write_shift(4,2); out.write_shift(4, F);
+	var data = [8,6815827,6619237,4849780,83]; for(i = 0; i < data.length; ++i) out.write_shift(4, data[i]);
+	if(F == 0x1C) {
+		Target = Target.slice(1);
+		out.write_shift(4, Target.length + 1);
+		for(i = 0; i < Target.length; ++i) out.write_shift(2, Target.charCodeAt(i));
+		out.write_shift(2, 0);
+	} else if(F & 0x02) {
+		data = "e0 c9 ea 79 f9 ba ce 11 8c 82 00 aa 00 4b a9 0b".split(" ");
+		for(i = 0; i < data.length; ++i) out.write_shift(1, parseInt(data[i], 16));
+		out.write_shift(4, 2*(Target.length + 1));
+		for(i = 0; i < Target.length; ++i) out.write_shift(2, Target.charCodeAt(i));
+		out.write_shift(2, 0);
+	} else {
+		data = "03 03 00 00 00 00 00 00 c0 00 00 00 00 00 00 46".split(" ");
+		for(i = 0; i < data.length; ++i) out.write_shift(1, parseInt(data[i], 16));
+		var P = 0;
+		while(Target.slice(P*3,P*3+3)=="../"||Target.slice(P*3,P*3+3)=="..\\") ++P;
+		out.write_shift(2, P);
+		out.write_shift(4, Target.length + 1);
+		for(i = 0; i < Target.length; ++i) out.write_shift(1, Target.charCodeAt(i) & 0xFF);
+		out.write_shift(1, 0);
+		out.write_shift(2, 0xFFFF);
+		out.write_shift(2, 0xDEAD);
+		for(i = 0; i < 6; ++i) out.write_shift(4, 0);
+	}
+	return out.slice(0, out.l);
+}
 
 /* 2.5.178 LongRGBA */
 function parse_LongRGBA(blob, length) { var r = blob.read_shift(1), g = blob.read_shift(1), b = blob.read_shift(1), a = blob.read_shift(1); return [r,g,b,a]; }

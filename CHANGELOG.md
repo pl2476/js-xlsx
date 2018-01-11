@@ -4,6 +4,37 @@ This log is intended to keep track of backwards-incompatible changes, including
 but not limited to API changes and file location changes.  Minor behavioral
 changes may not be included if they are not expected to break existing code.
 
+## 0.11.16 (2017-12-30)
+
+* XLS ANSI/CP separation
+* 'array' write type and ArrayBuffer processing
+
+## 0.11.6 (2017-10-16)
+
+* Semicolon-delimited files are detected
+
+## 0.11.5 (2017-09-30)
+
+* Bower main script shifted to full version
+* 'binary' / 'string' encoding
+
+## 0.11.3 (2017-08-19)
+
+* XLS cell ixfe/XF removed
+
+## 0.11.0 (2017-07-31)
+
+* Strip `require` statements from minified version
+* minifier mangler enabled
+
+## 0.10.9 (2017-07-28)
+
+* XLML/HTML resolution logic looks further into the data stream to decide type
+* Errors thrown on suspected RTF files
+
+## 0.10.5 (2017-06-09)
+
+* HTML Table output header/footer should not include `<table>` tag
 
 ## 0.10.2 (2017-05-16)
 

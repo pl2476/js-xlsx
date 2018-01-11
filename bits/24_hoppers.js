@@ -12,7 +12,7 @@ function recordhopper(data, cb/*:RecordHopperCB*/, opts/*:?any*/) {
 		length = tmpbyte & 0x7F;
 		for(cntbyte = 1; cntbyte <4 && (tmpbyte & 0x80); ++cntbyte) length += ((tmpbyte = data.read_shift(1)) & 0x7F)<<(7*cntbyte);
 		tgt = data.l + length;
-		var d = R.f(data, length, opts);
+		var d = (R.f||parsenoop)(data, length, opts);
 		data.l = tgt;
 		if(cb(d, R.n, RT)) return;
 	}
@@ -20,14 +20,14 @@ function recordhopper(data, cb/*:RecordHopperCB*/, opts/*:?any*/) {
 
 /* control buffer usage for fixed-length buffers */
 function buf_array()/*:BufArray*/ {
-	var bufs = [], blksz = 2048;
-	var newblk = function ba_newblk(sz) {
+	var bufs/*:Array<Block>*/ = [], blksz = has_buf ? 256 : 2048;
+	var newblk = function ba_newblk(sz/*:number*/)/*:Block*/ {
 		var o/*:Block*/ = (new_buf(sz)/*:any*/);
 		prep_blob(o, 0);
 		return o;
 	};
 
-	var curbuf = newblk(blksz);
+	var curbuf/*:Block*/ = newblk(blksz);
 
 	var endbuf = function ba_endbuf() {
 		if(!curbuf) return;
@@ -36,7 +36,7 @@ function buf_array()/*:BufArray*/ {
 		curbuf = null;
 	};
 
-	var next = function ba_next(sz) {
+	var next = function ba_next(sz/*:number*/)/*:Block*/ {
 		if(curbuf && sz < curbuf.length - curbuf.l) return curbuf;
 		endbuf();
 		return (curbuf = newblk(Math.max(sz+1, blksz)));
@@ -53,10 +53,10 @@ function buf_array()/*:BufArray*/ {
 }
 
 function write_record(ba/*:BufArray*/, type/*:string*/, payload, length/*:?number*/) {
-	var t/*:number*/ = Number(evert_RE[type]), l;
+	var t/*:number*/ = +XLSBRE[type], l;
 	if(isNaN(t)) return; // TODO: throw something here?
 	if(!length) length = XLSBRecordEnum[t].p || (payload||[]).length || 0;
-	l = 1 + (t >= 0x80 ? 1 : 0) + 1 + length;
+	l = 1 + (t >= 0x80 ? 1 : 0) + 1/* + length*/;
 	if(length >= 0x80) ++l; if(length >= 0x4000) ++l; if(length >= 0x200000) ++l;
 	var o = ba.next(l);
 	if(t <= 0x7F) o.write_shift(1, t);

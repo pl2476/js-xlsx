@@ -13,7 +13,7 @@ function getdatabin(data) {
 	if(data.asNodeBuffer && has_buf) return data.asNodeBuffer();
 	if(data._data && data._data.getContent) {
 		var o = data._data.getContent();
-		if(typeof o == "string") return str2cc(o);
+		if(typeof o == "string") return char_codes(o);
 		return Array.prototype.slice.call(o);
 	}
 	return null;
@@ -39,7 +39,7 @@ function getzipfile(zip, file/*:string*/) {
 	return o;
 }
 
-function getzipdata(zip, file/*:string*/, safe/*:?boolean*/) {
+function getzipdata(zip, file/*:string*/, safe/*:?boolean*/)/*:any*/ {
 	if(!safe) return getdata(getzipfile(zip, file));
 	if(!file) return null;
 	try { return getzipdata(zip, file); } catch(e) { return null; }
@@ -58,7 +58,7 @@ if(typeof JSZip !== 'undefined') jszip = JSZip;
 if (typeof exports !== 'undefined') {
 	if (typeof module !== 'undefined' && module.exports) {
 		if(typeof jszip === 'undefined') jszip = require('./jszip.js');
-		_fs = require('fs');
+		try { _fs = require('fs'); } catch(e) { }
 	}
 }
 

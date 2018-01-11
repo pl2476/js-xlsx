@@ -5,7 +5,6 @@ function parse_wb_xml(data, opts)/*:WorkbookFile*/ {
 	var wb = { AppVersion:{}, WBProps:{}, WBView:[], Sheets:[], CalcPr:{}, Names:[], xmlns: "" };
 	var pass = false, xmlns = "xmlns";
 	var dname = {}, dnstart = 0;
-	/*(data.match(tagregex)||[]).forEach */
 	data.replace(tagregex, function xml_wb(x, idx) {
 		var y/*:any*/ = parsexmltag(x);
 		switch(strip_ns(y[0])) {
@@ -26,8 +25,18 @@ function parse_wb_xml(data, opts)/*:WorkbookFile*/ {
 			case '<fileSharing': case '<fileSharing/>': break;
 
 			/* 18.2.28 workbookPr CT_WorkbookPr ? */
-			case '<workbookPr': delete y[0]; wb.WBProps = y; break;
-			case '<workbookPr/>': delete y[0]; wb.WBProps = y; break;
+			case '<workbookPr':
+			case '<workbookPr/>':
+				WBPropsDef.forEach(function(w) {
+					if(y[w[0]] == null) return;
+					switch(w[2]) {
+						case "bool": wb.WBProps[w[0]] = parsexmlbool(y[w[0]], w[0]); break;
+						case "int": wb.WBProps[w[0]] = parseInt(y[w[0]], 10); break;
+						default: wb.WBProps[w[0]] = y[w[0]];
+					}
+				});
+				if(y.codeName) wb.WBProps.CodeName = y.codeName;
+				break;
 			case '</workbookPr>': break;
 
 			/* 18.2.29 workbookProtection CT_WorkbookProtection ? */
@@ -35,13 +44,13 @@ function parse_wb_xml(data, opts)/*:WorkbookFile*/ {
 			case '<workbookProtection/>': break;
 
 			/* 18.2.1  bookViews CT_BookViews ? */
-			case '<bookViews>': case '</bookViews>': break;
+			case '<bookViews': case '<bookViews>': case '</bookViews>': break;
 			/* 18.2.30   workbookView CT_BookView + */
 			case '<workbookView': delete y[0]; wb.WBView.push(y); break;
 			case '</workbookView>': break;
 
 			/* 18.2.20 sheets CT_Sheets 1 */
-			case '<sheets>': case '</sheets>': break; // aggregate sheet
+			case '<sheets': case '<sheets>': case '</sheets>': break; // aggregate sheet
 			/* 18.2.19   sheet CT_Sheet + */
 			case '<sheet':
 				switch(y.state) {
@@ -120,15 +129,19 @@ function parse_wb_xml(data, opts)/*:WorkbookFile*/ {
 			case '<webPublishObject': break;
 
 			/* 18.2.10 extLst CT_ExtensionList ? */
-			case '<extLst>': case '</extLst>': case '<extLst/>': break;
+			case '<extLst': case '<extLst>': case '</extLst>': case '<extLst/>': break;
 			/* 18.2.7    ext CT_Extension + */
 			case '<ext': pass=true; break; //TODO: check with versions of excel
 			case '</ext>': pass=false; break;
 
 			/* Others */
 			case '<ArchID': break;
-			case '<AlternateContent': pass=true; break;
+			case '<AlternateContent':
+			case '<AlternateContent>': pass=true; break;
 			case '</AlternateContent>': pass=false; break;
+
+			/* TODO */
+			case '<revisionPtr': break;
 
 			default: if(!pass && opts.WTF) throw new Error('unrecognized ' + y[0] + ' in workbook');
 		}
@@ -148,14 +161,6 @@ var WB_XML_ROOT = writextag('workbook', null, {
 	'xmlns:r': XMLNS.r
 });
 
-function safe1904(wb/*:Workbook*/)/*:string*/ {
-	/* TODO: store date1904 somewhere else */
-	if(!wb.Workbook) return "false";
-	if(!wb.Workbook.WBProps) return "false";
-	// $FlowIgnore
-	return parsexmlbool(wb.Workbook.WBProps.date1904) ? "true" : "false";
-}
-
 function write_wb_xml(wb/*:Workbook*/, opts/*:?WriteOpts*/)/*:string*/ {
 	var o = [XML_HEADER];
 	o[o.length] = WB_XML_ROOT;
@@ -165,7 +170,18 @@ function write_wb_xml(wb/*:Workbook*/, opts/*:?WriteOpts*/)/*:string*/ {
 	/* fileVersion */
 	/* fileSharing */
 
-	o[o.length] = (writextag('workbookPr', null, {date1904:safe1904(wb), codeName:"ThisWorkbook"}));
+	var workbookPr/*:any*/ = ({codeName:"ThisWorkbook"}/*:any*/);
+	if(wb.Workbook && wb.Workbook.WBProps) {
+		WBPropsDef.forEach(function(x) {
+			/*:: if(!wb.Workbook || !wb.Workbook.WBProps) throw "unreachable"; */
+			if((wb.Workbook.WBProps[x[0]]/*:any*/) == null) return;
+			if((wb.Workbook.WBProps[x[0]]/*:any*/) == x[1]) return;
+			workbookPr[x[0]] = (wb.Workbook.WBProps[x[0]]/*:any*/);
+		});
+		/*:: if(!wb.Workbook || !wb.Workbook.WBProps) throw "unreachable"; */
+		if(wb.Workbook.WBProps.CodeName) { workbookPr.codeName = wb.Workbook.WBProps.CodeName; delete workbookPr.CodeName; }
+	}
+	o[o.length] = (writextag('workbookPr', null, workbookPr));
 
 	/* workbookProtection */
 	/* bookViews */
